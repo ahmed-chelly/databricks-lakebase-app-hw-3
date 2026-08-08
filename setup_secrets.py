@@ -10,8 +10,6 @@ read recent agent queries/predictions from Lakebase.
 Usage:
     python setup_secrets.py
 """
-import base64
-
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service import workspace
 import getpass
@@ -22,10 +20,10 @@ w = WorkspaceClient()
 w.secrets.put_secret(
     scope="database",
     key="lakebase-url",
-    # base64-encoded because lakebase.py base64-decodes every secret it reads
-    string_value=base64.b64encode(
-        getpass.getpass("Paste your lakebase url").encode("utf-8")
-    ).decode("utf-8"),
+    # Store as plain text - WorkspaceClient().secrets.get_secret() already
+    # base64-encodes the value on the way out (that's what lakebase.py's
+    # base64.b64decode() undoes), so pre-encoding here would double-encode it.
+    string_value=getpass.getpass("Paste your lakebase url"),
 )
 
 w.secrets.put_acl(
