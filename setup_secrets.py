@@ -1,51 +1,35 @@
 """
 One-time setup script: creates the Databricks secret scope and stores the
-Massive API key. Run this locally (with the Databricks CLI configured) or
-from a notebook - never commit the resulting secret value anywhere.
+Lakebase connection URL. Run this locally (with the Databricks CLI configured)
+or from a notebook - never commit the resulting secret value anywhere.
+
+The weather MCP server itself needs no API key (Open-Meteo is free and
+unauthenticated) - this secret is only used by the dashboard app to log and
+read recent agent queries/predictions from Lakebase.
 
 Usage:
     python setup_secrets.py
 """
+import base64
+
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service import workspace
 import getpass
 
 w = WorkspaceClient()
 
-w.secrets.create_scope(scope="massive")
-w.secrets.put_secret(
-    scope="massive",
-    key="api-key",
-    string_value=getpass.getpass("Paste your Massive API key: ")
-)
-
 w.secrets.create_scope(scope="database")
 w.secrets.put_secret(
     scope="database",
-    key="alpaca-key-id",
-    string_value=getpass.getpass("Paste your key id ")
-)
-
-w.secrets.put_secret(
-    scope="database",
-    key="alpaca-secret-key",
-    string_value=getpass.getpass("Paste secret key ")
-)
-
-w.secrets.put_secret(
-    scope="database",
     key="lakebase-url",
-    string_value=getpass.getpass("Paste your lakebase url")
+    # base64-encoded because lakebase.py base64-decodes every secret it reads
+    string_value=base64.b64encode(
+        getpass.getpass("Paste your lakebase url").encode("utf-8")
+    ).decode("utf-8"),
 )
 
 w.secrets.put_acl(
     scope="database",
-    principal="users",
-    permission=workspace.AclPermission.READ,
-)
-
-w.secrets.put_acl(
-    scope="massive",
     principal="users",
     permission=workspace.AclPermission.READ,
 )

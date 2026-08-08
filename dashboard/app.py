@@ -1,28 +1,32 @@
 """
-Paper-trading dashboard: a small Flask app to WATCH what the Agent Bricks
-agent is doing to the paper account via the Alpaca paper-trading MCP
-server (alpaca_mcp_server.py). This app never places trades itself - it
-only reads from Alpaca Markets' hosted paper-trading account via
-alpaca_broker.py, so it can run side-by-side with the MCP server and show,
-in near real time, the same account/positions/orders the agent is
-manipulating.
+Weather dashboard: shows recent weather questions/predictions the Agent
+Bricks agent has made through the weather MCP server
+(mcp_server/weather_mcp_server.py), plus a manual lookup form for ad-hoc
+queries against the same Open-Meteo adapter.
 
-Deploy this as its OWN Databricks App (separate from alpaca_mcp_server.py) -
+Reads the weather_queries table in Lakebase (populated by
+weather_mcp_server.py's _log_query() helper) via lakebase.py - this app
+never calls the MCP server directly, it only reads the log the agent leaves
+behind.
+
+Deploy this as its OWN Databricks App (separate from weather_mcp_server.py) -
 one app serves MCP tool calls, the other serves the human-facing UI.
 
 Run locally:
-    python dashboard_app.py
+    python app.py
 """
 
 import os
 
 from flask import Flask, jsonify, render_template, request
 
-import alpaca_broker
+import lakebase
+import open_meteo_client
+from open_meteo_client import WeatherLookupError
 
 app = Flask(__name__)
 
-DEFAULT_ACCOUNT_ID = os.environ.get("PAPER_ACCOUNT_ID", "agent-bricks-demo")
+DEFAULT_RECENT_LIMIT = int(os.environ.get("RECENT_QUERIES_LIMIT", 25))
 
 
 @app.route("/healthz")
@@ -41,32 +45,38 @@ def handle_exception(err):
 
 @app.route("/")
 def index():
-    """Dashboard UI showing the paper account's live state."""
-    return render_template("index.html", default_account_id=DEFAULT_ACCOUNT_ID)
+    """Dashboard UI: recent agent queries + a manual lookup form."""
+    return render_template("index.html")
 
 
-@app.route("/api/account")
-def api_account():
-    """Full account summary: cash, positions marked-to-market, total equity."""
-    account_id = request.args.get("account_id", DEFAULT_ACCOUNT_ID)
-    return jsonify(alpaca_broker.get_account_summary(account_id))
+@app.route("/api/recent")
+def api_recent():
+    """Recent weather queries/predictions logged by the agent, most recent first."""
+    limit = int(request.args.get("limit", DEFAULT_RECENT_LIMIT))
+    rows = lakebase.run_query(
+        """
+        SELECT email, tool_name, location, params, result_summary, created_at
+        FROM weather_queries
+        ORDER BY created_at DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+    return jsonify(rows)
 
 
-@app.route("/api/orders")
-def api_orders():
-    """Recent order history for the account, most recent first."""
-    account_id = request.args.get("account_id", DEFAULT_ACCOUNT_ID)
-    limit = int(request.args.get("limit", 50))
-    return jsonify(alpaca_broker.get_order_history(account_id, limit))
-
-
-@app.route("/api/quote")
-def api_quote():
-    """Ad-hoc quote lookup, for manually checking a price in the UI."""
-    symbol = request.args.get("symbol", "")
-    if not symbol:
-        return jsonify({"error": "symbol query param is required"}), 400
-    return jsonify(alpaca_broker.get_quote(symbol))
+@app.route("/api/weather")
+def api_weather():
+    """Ad-hoc weather lookup, for manually checking a location in the UI."""
+    location = request.args.get("location", "")
+    if not location:
+        return jsonify({"error": "location query param is required"}), 400
+    try:
+        place = open_meteo_client.resolve_location(location)
+        current = open_meteo_client.get_current(place["latitude"], place["longitude"])
+        return jsonify({"location": place["display_name"], **current})
+    except WeatherLookupError as e:
+        return jsonify({"error": str(e)}), 400
 
 
 if __name__ == "__main__":
