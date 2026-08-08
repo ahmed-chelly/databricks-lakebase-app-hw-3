@@ -18,7 +18,7 @@ import getpass
 
 w = WorkspaceClient()
 
-w.secrets.create_scope(scope="database")
+#w.secrets.create_scope(scope="database")
 w.secrets.put_secret(
     scope="database",
     key="lakebase-url",
